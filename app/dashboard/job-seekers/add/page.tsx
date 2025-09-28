@@ -6,6 +6,20 @@ import Image from 'next/image';
 import LoadingScreen from '@/components/LoadingScreen';
 import { validateEmail } from '@/lib/validation/emailValidation';
 import { validateAddress } from '@/lib/validation/addressValidation';
+import CustomFieldRenderer, { useCustomFields } from '@/components/CustomFieldRenderer';
+
+interface CustomFieldDefinition {
+  id: string;
+  field_name: string;
+  field_label: string;
+  field_type: string;
+  is_required: boolean;
+  is_hidden: boolean;
+  options?: string[];
+  placeholder?: string;
+  default_value?: string;
+  sort_order: number;
+}
 
 // Define field type for typesafety
 interface FormField {
@@ -57,6 +71,14 @@ export default function AddJobSeeker() {
     // This state will hold the dynamic form fields configuration
     const [formFields, setFormFields] = useState<FormField[]>([]);
     const [resumeFile, setResumeFile] = useState<File | null>(null);
+    const {
+        customFields,
+        customFieldValues,
+        isLoading: customFieldsLoading,
+        handleCustomFieldChange,
+        validateCustomFields,
+        getCustomFieldsForSubmission
+    } = useCustomFields("job-seekers");
 
     // Initialize with default fields 
     useEffect(() => {
@@ -144,6 +166,7 @@ export default function AddJobSeeker() {
             console.error('Error fetching active users:', error);
         }
     };
+
 
     // If jobSeekerId is present, fetch the job seeker data
     useEffect(() => {
@@ -244,6 +267,7 @@ export default function AddJobSeeker() {
         ));
     };
 
+
     // Handle file selection
     const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
         if (e.target.files && e.target.files.length > 0) {
@@ -270,6 +294,13 @@ export default function AddJobSeeker() {
             return;
         }
 
+        // Validate required custom fields
+        const customFieldValidation = validateCustomFields();
+        if (!customFieldValidation.isValid) {
+            setError(customFieldValidation.message);
+            return;
+        }
+
         setIsSubmitting(true);
         setError(null);
 
@@ -286,6 +317,10 @@ export default function AddJobSeeker() {
             if (!formData.owner && currentUser) {
                 formData.owner = currentUser.name;
             }
+
+            // Add custom fields to form data
+            const customFieldsToSend = getCustomFieldsForSubmission();
+            formData.custom_fields = JSON.stringify(customFieldsToSend);
 
             console.log(`${isEditMode ? 'Updating' : 'Creating'} job seeker data:`, formData);
 
@@ -327,6 +362,7 @@ export default function AddJobSeeker() {
     const handleGoBack = () => {
         router.back();
     };
+
 
     // Show loading screen when submitting
     if (isSubmitting) {
@@ -388,18 +424,18 @@ export default function AddJobSeeker() {
                 {/* Form */}
                 <form onSubmit={handleSubmit} className="space-y-4">
                     <div className="grid grid-cols-1 gap-4">
-                        {formFields.map((field, index) => (
-                            <div key={field.id} className="flex items-center">
-                                {/* Field label */}
-                                <label className="w-48 font-medium">
+                        {/* {formFields.map((field, index) => ( */}
+                            {/*  <div key={field.id} className="flex items-center">*/}
+                                
+                                {/* <label className="w-48 font-medium">
                                     {field.label}:
                                     {field.locked && (
                                         <span className="ml-1 text-xs text-gray-500">(Auto)</span>
                                     )}
-                                </label>
+                                </label> */}
 
-                                {/* Field input */}
-                                <div className="flex-1 relative">
+                                
+                                {/* <div className="flex-1 relative">
                                     {field.type === 'text' || field.type === 'email' || field.type === 'tel' ? (
                                         <div className="relative">
                                             <input
@@ -416,7 +452,7 @@ export default function AddJobSeeker() {
                                                 readOnly={field.locked}
                                             />
 
-                                            {/* Email validation indicator */}
+                                            
                                             {field.id === 'email' && field.value && (
                                                 <div className="absolute right-2 top-2">
                                                     {emailValidation.isChecking ? (
@@ -490,9 +526,43 @@ export default function AddJobSeeker() {
                                     {field.required && !field.locked && (
                                         <span className="absolute text-red-500 left-[-10px] top-2">*</span>
                                     )}
-                                </div>
-                            </div>
-                        ))}
+                                </div> */}
+                            {/*  </div> */}
+                        {/* ))} */}
+
+                        {/* Custom Fields Section */}
+                        {customFields.length > 0 && (
+                            <>
+                                {/* <div className="mt-8 mb-4">
+                                    <h3 className="text-lg font-semibold text-gray-800 border-b pb-2">
+                                        Additional Information
+                                    </h3>
+                                </div> */}
+
+                                {customFields.map((field) => (
+                                    <div key={field.id} className="flex items-center">
+                                        <label className="w-48 font-medium">
+                                            {field.field_label}:
+                                            {field.is_required && (
+                                                <span className="text-red-500 ml-1">*</span>
+                                            )}
+                                        </label>
+                                        <div className="flex-1 relative">
+                                            <CustomFieldRenderer
+                                                field={field}
+                                                value={customFieldValues[field.field_name]}
+                                                onChange={handleCustomFieldChange}
+                                            />
+                                            {field.is_required && (
+                                                <span className="absolute text-red-500 left-[-10px] top-2">
+                                                    *
+                                                </span>
+                                            )}
+                                        </div>
+                                    </div>
+                                ))}
+                            </>
+                        )}
                     </div>
 
                     {/* Email validation message */}

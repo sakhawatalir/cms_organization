@@ -4,6 +4,7 @@ import { useState, useEffect } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import Image from 'next/image';
 import LoadingScreen from '@/components/LoadingScreen';
+import CustomFieldRenderer, { useCustomFields } from '@/components/CustomFieldRenderer';
 
 // Define field type for typesafety - Updated to include checkbox and other types
 interface FormField {
@@ -19,19 +20,6 @@ interface FormField {
     checked?: boolean; // For checkbox fields
 }
 
-interface CustomFieldDefinition {
-    id: string;
-    entity_type: string;
-    field_name: string;
-    field_label: string;
-    field_type: string;
-    is_required: boolean;
-    is_hidden: boolean;
-    sort_order: number;
-    options?: string[];
-    placeholder?: string;
-    default_value?: string;
-}
 
 interface User {
     id: string;
@@ -46,19 +34,26 @@ export default function AddTask() {
 
     const [isEditMode, setIsEditMode] = useState(!!taskId);
     const [isLoadingTask, setIsLoadingTask] = useState(!!taskId);
-    const [isLoadingCustomFields, setIsLoadingCustomFields] = useState(true);
     const [loadError, setLoadError] = useState<string | null>(null);
 
     const [formFields, setFormFields] = useState<FormField[]>([]);
-    const [customFieldDefinitions, setCustomFieldDefinitions] = useState<CustomFieldDefinition[]>([]);
     const [activeUsers, setActiveUsers] = useState<User[]>([]);
     const [isSubmitting, setIsSubmitting] = useState(false);
     const [error, setError] = useState<string | null>(null);
 
-    // Initialize with default fields and load custom fields
+    // Use the custom fields hook
+    const {
+        customFields,
+        customFieldValues,
+        isLoading: customFieldsLoading,
+        handleCustomFieldChange,
+        validateCustomFields,
+        getCustomFieldsForSubmission
+    } = useCustomFields("tasks");
+
+    // Initialize with default fields and load users
     useEffect(() => {
         initializeFields();
-        loadCustomFields();
         fetchActiveUsers();
     }, []);
 
@@ -130,79 +125,13 @@ export default function AddTask() {
         }
     };
 
-    // Load custom field definitions from the API
-    const loadCustomFields = async () => {
-        setIsLoadingCustomFields(true);
-        try {
-            const response = await fetch('/api/admin/field-management/tasks');
-            if (response.ok) {
-                const data = await response.json();
-                const customFields = data.customFields || [];
-                setCustomFieldDefinitions(customFields);
-
-                // Add custom fields to form fields
-                addCustomFieldsToForm(customFields);
-            } else {
-                console.error('Failed to load custom fields');
-            }
-        } catch (error) {
-            console.error('Error loading custom fields:', error);
-        } finally {
-            setIsLoadingCustomFields(false);
-        }
-    };
-
-    // Add custom fields to the form
-    const addCustomFieldsToForm = (customFields: CustomFieldDefinition[]) => {
-        const customFormFields: FormField[] = customFields
-            .filter(field => !field.is_hidden)
-            .sort((a, b) => a.sort_order - b.sort_order)
-            .map(field => ({
-                id: `custom_${field.field_name}`,
-                name: field.field_name,
-                label: field.field_label,
-                type: mapFieldType(field.field_type),
-                required: field.is_required,
-                visible: !field.is_hidden,
-                options: field.options || undefined,
-                placeholder: field.placeholder || undefined,
-                value: field.default_value || '',
-                checked: field.field_type === 'checkbox' ? false : undefined
-            }));
-
-        setFormFields(prevFields => [...prevFields, ...customFormFields]);
-    };
-
-    // Map custom field types to form field types
-    const mapFieldType = (customType: string): FormField['type'] => {
-        switch (customType) {
-            case 'text':
-            case 'email':
-            case 'tel':
-            case 'date':
-            case 'textarea':
-            case 'file':
-            case 'number':
-            case 'url':
-            case 'time':
-            case 'checkbox':
-                return customType as FormField['type'];
-            case 'select':
-            case 'radio':
-                return 'select';
-            case 'phone':
-                return 'tel';
-            default:
-                return 'text';
-        }
-    };
 
     // Load task data when in edit mode
     useEffect(() => {
-        if (taskId && formFields.length > 0) {
+        if (taskId && formFields.length > 0 && !customFieldsLoading) {
             fetchTaskData(taskId);
         }
-    }, [taskId, formFields.length]);
+    }, [taskId, formFields.length, customFieldsLoading]);
 
     // Function to fetch task data
     const fetchTaskData = async (id: string) => {
@@ -269,9 +198,9 @@ export default function AddTask() {
                             customFieldsObj = task.custom_fields;
                         }
 
+                        // Update custom field values using the hook
                         Object.entries(customFieldsObj).forEach(([key, value]) => {
-                            const customFieldId = `custom_${key.replace(/\s+/g, '_').toLowerCase()}`;
-                            updateField(customFieldId, value);
+                            handleCustomFieldChange(key, String(value));
                         });
                     } catch (error) {
                         console.error('Error parsing custom fields:', error);
@@ -307,11 +236,18 @@ export default function AddTask() {
     const handleSubmit = async (e: React.FormEvent) => {
         e.preventDefault();
 
+        // Validate required custom fields
+        const customFieldValidation = validateCustomFields();
+        if (!customFieldValidation.isValid) {
+            setError(customFieldValidation.message);
+            return;
+        }
+
         setIsSubmitting(true);
         setError(null);
 
         try {
-            // Create an object with all field values
+            // Create an object with all standard field values
             const formData = formFields.reduce((acc, field) => {
                 if (field.visible) {
                     if (field.type === 'checkbox') {
@@ -323,30 +259,13 @@ export default function AddTask() {
                 return acc;
             }, {} as Record<string, string>);
 
-            // Separate custom fields
-            const customFields: Record<string, string> = {};
-            const standardData: Record<string, string> = {};
-
-            formFields.forEach(field => {
-                if (field.visible) {
-                    const fieldValue = field.type === 'checkbox' ? (field.checked ? 'true' : 'false') : field.value;
-
-                    if (field.id.startsWith('custom_')) {
-                        const customFieldDef = customFieldDefinitions.find(def => def.field_name === field.name);
-                        const key = customFieldDef?.field_label || field.label;
-                        customFields[key] = fieldValue;
-                    } else {
-                        standardData[field.name] = fieldValue;
-                    }
-                }
-            });
-
-            // Add custom fields to the standard data
-            if (Object.keys(customFields).length > 0) {
-                standardData.customFields = JSON.stringify(customFields);
+            // Add custom fields to the form data
+            const customFieldsToSend = getCustomFieldsForSubmission();
+            if (Object.keys(customFieldsToSend).length > 0) {
+                formData.custom_fields = JSON.stringify(customFieldsToSend);
             }
 
-            console.log(`${isEditMode ? 'Updating' : 'Creating'} task data:`, standardData);
+            console.log(`${isEditMode ? 'Updating' : 'Creating'} task data:`, formData);
 
             const url = isEditMode ? `/api/tasks/${taskId}` : '/api/tasks';
             const method = isEditMode ? 'PUT' : 'POST';
@@ -357,7 +276,7 @@ export default function AddTask() {
                     'Content-Type': 'application/json',
                     'Authorization': `Bearer ${document.cookie.replace(/(?:(?:^|.*;\s*)token\s*=\s*([^;]*).*$)|^.*$/, "$1")}`
                 },
-                body: JSON.stringify(standardData)
+                body: JSON.stringify(formData)
             });
 
             const data = await response.json();
@@ -392,7 +311,7 @@ export default function AddTask() {
     }
 
     // Show loading screen when loading existing task data or custom fields
-    if (isLoadingTask || isLoadingCustomFields) {
+    if (isLoadingTask || customFieldsLoading) {
         return <LoadingScreen message="Loading task form..." />;
     }
 
@@ -443,36 +362,20 @@ export default function AddTask() {
                     </div>
                 )}
 
-                {/* Custom Fields Info */}
-                {customFieldDefinitions.length > 0 && (
-                    <div className="bg-blue-50 border border-blue-200 p-3 mb-4 rounded">
-                        <p className="text-sm text-blue-700">
-                            <strong>Custom Fields:</strong> {customFieldDefinitions.filter(f => !f.is_hidden).length} custom fields have been added to this form.
-                            <button
-                                onClick={() => router.push('/dashboard/admin/field-mapping?section=tasks')}
-                                className="ml-2 text-blue-600 underline hover:text-blue-800"
-                            >
-                                Manage custom fields
-                            </button>
-                        </p>
-                    </div>
-                )}
 
                 {/* Form */}
                 <form onSubmit={handleSubmit} className="space-y-4">
                     <div className="grid grid-cols-1 gap-4">
-                        {formFields
+                        {/* Standard Task Fields */}
+                        {/* {formFields
                             .filter(field => field.visible)
                             .map((field) => (
-                                <div key={field.id} className="flex items-center">
-                                    <label className="w-48 font-medium">
+                                <div key={field.id} className="flex items-center"> */}
+                                    {/* <label className="w-48 font-medium">
                                         {field.label}:
-                                        {field.id.startsWith('custom_') && (
-                                            <span className="ml-1 text-xs text-blue-600">(Custom)</span>
-                                        )}
-                                    </label>
+                                    </label> */}
 
-                                    <div className="flex-1 relative">
+                                    {/* <div className="flex-1 relative">
                                         {field.type === 'checkbox' ? (
                                             <input
                                                 type="checkbox"
@@ -546,9 +449,43 @@ export default function AddTask() {
                                         {field.required && (
                                             <span className="absolute text-red-500 left-[-10px] top-2">*</span>
                                         )}
+                                    </div> */}
+                                {/* </div> */}
+                            {/* ))} */}
+
+                        {/* Custom Fields Section */}
+                        {customFields.length > 0 && (
+                            <>
+                                {/* <div className="mt-8 mb-4">
+                                    <h3 className="text-lg font-semibold text-gray-800 border-b pb-2">
+                                        Additional Information
+                                    </h3>
+                                </div> */}
+
+                                {customFields.map((field) => (
+                                    <div key={field.id} className="flex items-center">
+                                        <label className="w-48 font-medium">
+                                            {field.field_label}:
+                                            {field.is_required && (
+                                                <span className="text-red-500 ml-1">*</span>
+                                            )}
+                                        </label>
+                                        <div className="flex-1 relative">
+                                            <CustomFieldRenderer
+                                                field={field}
+                                                value={customFieldValues[field.field_name]}
+                                                onChange={handleCustomFieldChange}
+                                            />
+                                            {field.is_required && (
+                                                <span className="absolute text-red-500 left-[-10px] top-2">
+                                                    *
+                                                </span>
+                                            )}
+                                        </div>
                                     </div>
-                                </div>
-                            ))}
+                                ))}
+                            </>
+                        )}
                     </div>
 
                     {/* Form Buttons */}

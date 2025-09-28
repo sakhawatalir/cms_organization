@@ -5,6 +5,7 @@ import { useState, useEffect } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import Image from 'next/image';
 import LoadingScreen from '@/components/LoadingScreen';
+import CustomFieldRenderer, { useCustomFields } from '@/components/CustomFieldRenderer';
 
 // Define field type for typesafety
 interface FormField {
@@ -19,19 +20,6 @@ interface FormField {
     value: string;
 }
 
-interface CustomFieldDefinition {
-    id: string;
-    entity_type: string;
-    field_name: string;
-    field_label: string;
-    field_type: string;
-    is_required: boolean;
-    is_hidden: boolean;
-    sort_order: number;
-    options?: string[];
-    placeholder?: string;
-    default_value?: string;
-}
 
 export default function AddJob() {
     const router = useRouter();
@@ -41,20 +29,27 @@ export default function AddJob() {
     // Add these state variables
     const [isEditMode, setIsEditMode] = useState(!!jobId);
     const [isLoadingJob, setIsLoadingJob] = useState(!!jobId);
-    const [isLoadingCustomFields, setIsLoadingCustomFields] = useState(true);
     const [loadError, setLoadError] = useState<string | null>(null);
 
     // This state will hold the dynamic form fields configuration
     const [formFields, setFormFields] = useState<FormField[]>([]);
-    const [customFieldDefinitions, setCustomFieldDefinitions] = useState<CustomFieldDefinition[]>([]);
     const [jobDescFile, setJobDescFile] = useState<File | null>(null);
     const [isSubmitting, setIsSubmitting] = useState(false);
     const [error, setError] = useState<string | null>(null);
 
-    // Initialize with default fields and load custom fields
+    // Use the custom fields hook
+    const {
+        customFields,
+        customFieldValues,
+        isLoading: customFieldsLoading,
+        handleCustomFieldChange,
+        validateCustomFields,
+        getCustomFieldsForSubmission
+    } = useCustomFields("jobs");
+
+    // Initialize with default fields
     useEffect(() => {
         initializeFields();
-        loadCustomFields();
     }, []);
 
     const initializeFields = () => {
@@ -129,76 +124,13 @@ export default function AddJob() {
         setFormFields(standardFields);
     };
 
-    // Load custom field definitions from the API
-    const loadCustomFields = async () => {
-        setIsLoadingCustomFields(true);
-        try {
-            const response = await fetch('/api/admin/field-management/jobs');
-            if (response.ok) {
-                const data = await response.json();
-                const customFields = data.customFields || [];
-                setCustomFieldDefinitions(customFields);
-
-                // Add custom fields to form fields
-                addCustomFieldsToForm(customFields);
-            } else {
-                console.error('Failed to load custom fields');
-            }
-        } catch (error) {
-            console.error('Error loading custom fields:', error);
-        } finally {
-            setIsLoadingCustomFields(false);
-        }
-    };
-
-    // Add custom fields to the form
-    const addCustomFieldsToForm = (customFields: CustomFieldDefinition[]) => {
-        const customFormFields: FormField[] = customFields
-            .filter(field => !field.is_hidden) // Only show visible fields
-            .sort((a, b) => a.sort_order - b.sort_order) // Sort by sort_order
-            .map(field => ({
-                id: `custom_${field.field_name}`,
-                name: field.field_name,
-                label: field.field_label,
-                type: mapFieldType(field.field_type),
-                required: field.is_required,
-                visible: !field.is_hidden,
-                options: field.options || undefined,
-                placeholder: field.placeholder || undefined,
-                value: field.default_value || ''
-            }));
-
-        setFormFields(prevFields => [...prevFields, ...customFormFields]);
-    };
-
-    // Map custom field types to form field types
-    const mapFieldType = (customType: string): FormField['type'] => {
-        switch (customType) {
-            case 'text':
-            case 'email':
-            case 'tel':
-            case 'date':
-            case 'textarea':
-            case 'file':
-            case 'number':
-            case 'url':
-                return customType as FormField['type'];
-            case 'select':
-            case 'radio':
-                return 'select';
-            case 'phone':
-                return 'tel';
-            default:
-                return 'text';
-        }
-    };
 
     // Load job data when in edit mode
     useEffect(() => {
-        if (jobId && formFields.length > 0) {
+        if (jobId && formFields.length > 0 && !customFieldsLoading) {
             fetchJobData(jobId);
         }
-    }, [jobId, formFields.length]);
+    }, [jobId, formFields.length, customFieldsLoading]);
 
     // Function to fetch job data
     const fetchJobData = async (id: string) => {
@@ -273,11 +205,9 @@ export default function AddJob() {
                             customFieldsObj = job.custom_fields;
                         }
 
-                        // Update custom fields
+                        // Update custom field values using the hook
                         Object.entries(customFieldsObj).forEach(([key, value]) => {
-                            // Find the custom field by its original field name
-                            const customFieldId = `custom_${key.replace(/\s+/g, '_').toLowerCase()}`;
-                            updateField(customFieldId, value);
+                            handleCustomFieldChange(key, String(value));
                         });
                     } catch (error) {
                         console.error('Error parsing custom fields:', error);
@@ -313,11 +243,18 @@ export default function AddJob() {
     const handleSubmit = async (e: React.FormEvent) => {
         e.preventDefault();
 
+        // Validate required custom fields
+        const customFieldValidation = validateCustomFields();
+        if (!customFieldValidation.isValid) {
+            setError(customFieldValidation.message);
+            return;
+        }
+
         setIsSubmitting(true);
         setError(null);
 
         try {
-            // Create an object with all field values (only the visible ones)
+            // Create an object with all standard field values (only the visible ones)
             const formData = formFields.reduce((acc, field) => {
                 if (field.visible) {
                     acc[field.name] = field.value;
@@ -325,29 +262,13 @@ export default function AddJob() {
                 return acc;
             }, {} as Record<string, string>);
 
-            // Separate custom fields
-            const customFields: Record<string, string> = {};
-            const standardData: Record<string, string> = {};
-
-            formFields.forEach(field => {
-                if (field.visible) {
-                    if (field.id.startsWith('custom_')) {
-                        // For custom fields, use the field label as the key
-                        const customFieldDef = customFieldDefinitions.find(def => def.field_name === field.name);
-                        const key = customFieldDef?.field_label || field.label;
-                        customFields[key] = field.value;
-                    } else {
-                        standardData[field.name] = field.value;
-                    }
-                }
-            });
-
-            // Add custom fields to the standard data
-            if (Object.keys(customFields).length > 0) {
-                standardData.customFields = JSON.stringify(customFields);
+            // Add custom fields to the form data
+            const customFieldsToSend = getCustomFieldsForSubmission();
+            if (Object.keys(customFieldsToSend).length > 0) {
+                formData.custom_fields = JSON.stringify(customFieldsToSend);
             }
 
-            console.log(`${isEditMode ? 'Updating' : 'Creating'} job data:`, standardData);
+            console.log(`${isEditMode ? 'Updating' : 'Creating'} job data:`, formData);
 
             // Choose the appropriate API endpoint and method based on whether we're editing or creating
             const url = isEditMode ? `/api/jobs/${jobId}` : '/api/jobs';
@@ -360,7 +281,7 @@ export default function AddJob() {
                     'Content-Type': 'application/json',
                     'Authorization': `Bearer ${document.cookie.replace(/(?:(?:^|.*;\s*)token\s*=\s*([^;]*).*$)|^.*$/, "$1")}`
                 },
-                body: JSON.stringify(standardData)
+                body: JSON.stringify(formData)
             });
 
             const data = await response.json();
@@ -397,7 +318,7 @@ export default function AddJob() {
     }
 
     // Show loading screen when loading existing job data or custom fields
-    if (isLoadingJob || isLoadingCustomFields) {
+    if (isLoadingJob || customFieldsLoading) {
         return <LoadingScreen message="Loading job form..." />;
     }
 
@@ -448,38 +369,22 @@ export default function AddJob() {
                     </div>
                 )}
 
-                {/* Custom Fields Info */}
-                {customFieldDefinitions.length > 0 && (
-                    <div className="bg-blue-50 border border-blue-200 p-3 mb-4 rounded">
-                        <p className="text-sm text-blue-700">
-                            <strong>Custom Fields:</strong> {customFieldDefinitions.filter(f => !f.is_hidden).length} custom fields have been added to this form.
-                            <button
-                                onClick={() => router.push('/dashboard/admin/field-mapping?section=jobs')}
-                                className="ml-2 text-blue-600 underline hover:text-blue-800"
-                            >
-                                Manage custom fields
-                            </button>
-                        </p>
-                    </div>
-                )}
 
                 {/* Form */}
                 <form onSubmit={handleSubmit} className="space-y-4">
                     <div className="grid grid-cols-1 gap-4">
-                        {formFields
+                        {/* Standard Job Fields */}
+                        {/* {formFields
                             .filter(field => field.visible)
                             .map((field, index) => (
-                                <div key={field.id} className="flex items-center">
+                                <div key={field.id} className="flex items-center"> */}
                                     {/* Field label */}
-                                    <label className="w-48 font-medium">
+                                    {/* <label className="w-48 font-medium">
                                         {field.label}:
-                                        {field.id.startsWith('custom_') && (
-                                            <span className="ml-1 text-xs text-blue-600">(Custom)</span>
-                                        )}
-                                    </label>
+                                    </label> */}
 
                                     {/* Field input */}
-                                    <div className="flex-1 relative">
+                                    {/* <div className="flex-1 relative">
                                         {field.type === 'text' || field.type === 'email' || field.type === 'tel' || field.type === 'url' ? (
                                             <input
                                                 type={field.type}
@@ -550,9 +455,43 @@ export default function AddJob() {
                                         {field.required && (
                                             <span className="absolute text-red-500 left-[-10px] top-2">*</span>
                                         )}
+                                    </div> */}
+                                {/* </div> */}
+                            {/* ))} */}
+
+                        {/* Custom Fields Section */}
+                        {customFields.length > 0 && (
+                            <>
+                                {/* <div className="mt-8 mb-4">
+                                    <h3 className="text-lg font-semibold text-gray-800 border-b pb-2">
+                                        Additional Information
+                                    </h3>
+                                </div> */}
+
+                                {customFields.map((field) => (
+                                    <div key={field.id} className="flex items-center">
+                                        <label className="w-48 font-medium">
+                                            {field.field_label}:
+                                            {field.is_required && (
+                                                <span className="text-red-500 ml-1">*</span>
+                                            )}
+                                        </label>
+                                        <div className="flex-1 relative">
+                                            <CustomFieldRenderer
+                                                field={field}
+                                                value={customFieldValues[field.field_name]}
+                                                onChange={handleCustomFieldChange}
+                                            />
+                                            {field.is_required && (
+                                                <span className="absolute text-red-500 left-[-10px] top-2">
+                                                    *
+                                                </span>
+                                            )}
+                                        </div>
                                     </div>
-                                </div>
-                            ))}
+                                ))}
+                            </>
+                        )}
                     </div>
 
                     {/* Form Buttons */}
