@@ -1,8 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { cookies } from 'next/headers';
 
-export async function GET(request: NextRequest, { params }: { params: { teamId: string } }) {
+export async function GET(request: NextRequest, { params }: { params: Promise<{ teamId: string }> }) {
     try {
+        const { teamId } = await params;
         const cookieStore = await cookies();
         const token = cookieStore.get('token')?.value;
 
@@ -13,7 +14,7 @@ export async function GET(request: NextRequest, { params }: { params: { teamId: 
             );
         }
 
-        const response = await fetch(`${process.env.API_BASE_URL || 'http://localhost:8080'}/api/teams/${params.teamId}/members`, {
+        const response = await fetch(`${process.env.API_BASE_URL || 'http://localhost:8080'}/api/teams/${teamId}/members`, {
             method: 'GET',
             headers: {
                 'Content-Type': 'application/json',
@@ -32,8 +33,9 @@ export async function GET(request: NextRequest, { params }: { params: { teamId: 
     }
 }
 
-export async function POST(request: NextRequest, { params }: { params: { teamId: string } }) {
+export async function POST(request: NextRequest, { params }: { params: Promise<{ teamId: string }> }) {
     try {
+        const { teamId } = await params;
         const cookieStore = await cookies();
         const token = cookieStore.get('token')?.value;
 
@@ -46,7 +48,7 @@ export async function POST(request: NextRequest, { params }: { params: { teamId:
 
         const body = await request.json();
 
-        const response = await fetch(`${process.env.API_BASE_URL || 'http://localhost:8080'}/api/teams/${params.teamId}/members`, {
+        const response = await fetch(`${process.env.API_BASE_URL || 'http://localhost:8080'}/api/teams/${teamId}/members`, {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',

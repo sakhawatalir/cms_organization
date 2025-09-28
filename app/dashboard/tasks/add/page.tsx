@@ -367,15 +367,15 @@ export default function AddTask() {
                 <form onSubmit={handleSubmit} className="space-y-4">
                     <div className="grid grid-cols-1 gap-4">
                         {/* Standard Task Fields */}
-                        {/* {formFields
+                        {formFields
                             .filter(field => field.visible)
                             .map((field) => (
-                                <div key={field.id} className="flex items-center"> */}
-                                    {/* <label className="w-48 font-medium">
+                                <div key={field.id} className="flex items-center">
+                                    <label className="w-48 font-medium">
                                         {field.label}:
-                                    </label> */}
+                                    </label>
 
-                                    {/* <div className="flex-1 relative">
+                                    <div className="flex-1 relative">
                                         {field.type === 'checkbox' ? (
                                             <input
                                                 type="checkbox"
@@ -449,18 +449,18 @@ export default function AddTask() {
                                         {field.required && (
                                             <span className="absolute text-red-500 left-[-10px] top-2">*</span>
                                         )}
-                                    </div> */}
-                                {/* </div> */}
-                            {/* ))} */}
+                                    </div>
+                                </div>
+                            ))}
 
                         {/* Custom Fields Section */}
                         {customFields.length > 0 && (
                             <>
-                                {/* <div className="mt-8 mb-4">
+                                <div className="mt-8 mb-4">
                                     <h3 className="text-lg font-semibold text-gray-800 border-b pb-2">
                                         Additional Information
                                     </h3>
-                                </div> */}
+                                </div>
 
                                 {customFields.map((field) => (
                                     <div key={field.id} className="flex items-center">

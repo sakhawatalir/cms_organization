@@ -3,9 +3,10 @@ import { cookies } from 'next/headers';
 
 export async function DELETE(
     request: NextRequest,
-    { params }: { params: { teamId: string, userId: string } }
+    { params }: { params: Promise<{ teamId: string, userId: string }> }
 ) {
     try {
+        const { teamId, userId } = await params;
         const cookieStore = await cookies();
         const token = cookieStore.get('token')?.value;
 
@@ -17,7 +18,7 @@ export async function DELETE(
         }
 
         const response = await fetch(
-            `${process.env.API_BASE_URL || 'http://localhost:8080'}/api/teams/${params.teamId}/members/${params.userId}`,
+            `${process.env.API_BASE_URL || 'http://localhost:8080'}/api/teams/${teamId}/members/${userId}`,
             {
                 method: 'DELETE',
                 headers: {

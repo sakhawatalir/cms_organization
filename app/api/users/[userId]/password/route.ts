@@ -1,8 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { cookies } from 'next/headers';
 
-export async function PUT(request: NextRequest, { params }: { params: { userId: string } }) {
+export async function PUT(request: NextRequest, { params }: { params: Promise<{ userId: string }> }) {
     try {
+        const { userId } = await params;
         const cookieStore = await cookies();
         const token = cookieStore.get('token')?.value;
 
@@ -16,7 +17,7 @@ export async function PUT(request: NextRequest, { params }: { params: { userId: 
         const body = await request.json();
 
         const response = await fetch(
-            `${process.env.API_BASE_URL || 'http://localhost:8080'}/api/users/${params.userId}/password`,
+            `${process.env.API_BASE_URL || 'http://localhost:8080'}/api/users/${userId}/password`,
             {
                 method: 'PUT',
                 headers: {
